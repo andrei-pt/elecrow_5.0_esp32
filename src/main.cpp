@@ -5,7 +5,11 @@
 #include <LovyanGFX.hpp>
 #include <lgfx/v1/platforms/esp32s3/Panel_RGB.hpp>
 #include <lgfx/v1/platforms/esp32s3/Bus_RGB.hpp>
-#include "ui.h"
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <ArduinoJson.h>   // Add "ArduinoJson" to your platformio.ini lib_deps if missing
+#include <credentials.h> 
 
 #define TFT_BL 2
 
@@ -154,13 +158,98 @@ void my_touchpad_read(lv_indev_drv_t *indev_driver, lv_indev_data_t *data)
   delay(15);
 }
 
+void get_mb_temperature()
+{
+  const char* url = "https://eoupc7fakm23d5b.m.pipedream.net";
+
+  // Since this is an HTTPS endpoint, use a secure client.
+  // setInsecure() skips cert validation — fine for pipedream test endpoints,
+  // but replace with a proper root CA if you productionize this.
+  WiFiClientSecure client;
+  client.setInsecure();
+
+  HTTPClient http;
+  http.setTimeout(15000);
+  http.begin(client, url);
+
+  int httpCode = http.GET();
+
+  lcd.fillScreen(TFT_BLACK);
+  lcd.setTextColor(TFT_WHITE);
+
+  lcd.setTextSize(3);
+  lcd.setCursor(0, 0);
+
+  if (httpCode == 200)
+  {
+    String payload = http.getString();
+
+    // Adjust capacity if the API response grows
+    StaticJsonDocument<512> doc;
+    DeserializationError err = deserializeJson(doc, payload);
+
+    if (err)
+    {
+      lcd.println("JSON parse error:");
+      lcd.println(err.c_str());
+      Serial.print("deserializeJson() failed: ");
+      Serial.println(err.c_str());
+    }
+    else
+    {
+      const char* current_date = doc["current_date"] | "N/A";
+      const char* current_temp = doc["current_temp"] | "N/A";
+      const char* temp_max     = doc["temp_max"] | "N/A";
+      const char* temp_min     = doc["temp_min"] | "N/A";
+      const char* overlook     = doc["overlook"] | "N/A";
+
+      lcd.print("Updated at: ");
+      lcd.println(current_date);
+
+      lcd.print("Current temp: ");
+      lcd.println(current_temp);
+      Serial.print("Now: ");
+      Serial.println(current_temp);
+
+      lcd.print("Max temp: ");
+      lcd.println(temp_max);
+
+      lcd.print("Min temp: ");
+      lcd.println(temp_min);
+
+      lcd.print("Overlook: ");
+      lcd.println(overlook);
+
+      Serial.println("Weather data displayed successfully.");
+    }
+  }
+  else
+  {
+    // Non-200: show status code and raw response body
+    String payload = http.getString();
+
+    lcd.setTextColor(TFT_RED);
+    lcd.print("HTTP Error: ");
+    lcd.println(httpCode);
+    lcd.setTextColor(TFT_WHITE);
+    lcd.println(payload);
+
+    Serial.print("HTTP GET failed, code: ");
+    Serial.println(httpCode);
+    Serial.println(payload);
+    Serial.println(http.errorToString(httpCode));
+  }
+
+  http.end();
+}
+
 void setup()
 {
 
   Serial.begin(9600);
   // Serial.println("LVGL Widgets Demo");
-  Wire.begin(19, 20);
-  dht20.begin();
+  // Wire.begin(19, 20);
+  // dht20.begin();
   //IO Pin
   pinMode(38, OUTPUT);
   digitalWrite(38, LOW);
@@ -168,14 +257,16 @@ void setup()
   // Init Display
   lcd.begin();
   lcd.fillScreen(TFT_BLACK);
-  // lcd.setTextSize(2);
+  lcd.setTextSize(2);
   delay(200);
 
   lv_init();
 
   delay(100);
-  touch_init();
+  // touch_init();
 
+  
+  
   screenWidth = lcd.width();
   screenHeight = lcd.height();
 
@@ -200,37 +291,37 @@ void setup()
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, HIGH);
 #endif
-  ui_init();//开机UI界面
 
-  lv_timer_handler();
+  lcd.fillScreen(TFT_BLACK);
+  lcd.setTextColor(TFT_WHITE);
+  lcd.setTextSize(3);
+  lcd.setTextWrap(false);
+  // lcd.setCursor((lcd.width() - 180) / 2, lcd.height() / 2 - 15);
+  lcd.setCursor(80, 20);
+  lcd.print("Hello World");
 
-  Serial.println( "Setup done" );
+  Serial.println("Setup done");
+
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(500);
+    Serial.print(".");
+  }
+  Serial.println("");
+  Serial.println("WiFi connected");
+  Serial.print("IP address: ");
+  Serial.println(WiFi.localIP());
+
+  get_mb_temperature();
 
 }
 
 void loop()
 {
-  char DHT_buffer[16];
-  //int a = (int)dht20.getTemperature();
-  //int b = (int)dht20.getHumidity();
+  if (led == 1)
+    digitalWrite(38, HIGH);
+  if (led == 0)
+    digitalWrite(38, LOW);
 
-  std::string label = "Temp";
-  int a = 25;
-
-  snprintf(DHT_buffer, sizeof(DHT_buffer), "%s: %d", label.c_str(), a);
-
-  // snprintf(DHT_buffer, sizeof(DHT_buffer), "%d", a);
-  lv_label_set_text(ui_Label1, DHT_buffer);
-  // Serial.println("Temperature set to " + String(a));
-
-  int b = 253;
-  snprintf(DHT_buffer, sizeof(DHT_buffer), "%s: %d", "Humi", b);
-  lv_label_set_text(ui_Label2, DHT_buffer);
-
-  if(led == 1)
-  digitalWrite(38, HIGH);
-  if(led == 0)
-  digitalWrite(38, LOW);
-  lv_timer_handler(); /* let the GUI do its work */
-  delay( 1000 );
+  delay(100);
 }
